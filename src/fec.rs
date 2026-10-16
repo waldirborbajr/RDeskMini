@@ -7,7 +7,7 @@ use crate::protocol::{FEC_DATA_SHARDS, FEC_PARITY_SHARDS, FEC_SHARD_SIZE};
 // ============================================================
 // FEC helpers
 // ============================================================
-struct FecCodec {
+pub(crate) struct FecCodec {
     pub(crate) rs: ReedSolomon,
 }
 

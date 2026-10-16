@@ -15,6 +15,7 @@ use crate::fec::{decode_udp_datagram, FecCodec};
 use crate::i18n;
 use crate::protocol::{BackendMsg, InputEvent, FEC_DATA_SHARDS};
 use crate::video::yuv_to_rgb;
+use openh264::formats::YUVSource;
 
 // ============================================================
 // CLIENT backend
@@ -140,8 +141,8 @@ pub(crate) fn run_client(
                         if let Ok(payload) = fec.decode(received, entry.0 as usize) {
                             total_expected += 1;
                             if let Ok(Some(yuv)) = decoder.decode(&payload) {
-                                let w = yuv.width() as u32;
-                                let h = yuv.height() as u32;
+                                let w = yuv.dimensions().0 as u32;
+                                let h = yuv.dimensions().1 as u32;
                                 let rgb = yuv_to_rgb(&yuv);
                                 let _ = tx.send(BackendMsg::Frame {
                                     width: w,

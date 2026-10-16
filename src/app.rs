@@ -16,7 +16,7 @@ use crate::protocol::{AppMode, BackendMsg, InputEvent, SessionState};
 // ============================================================
 // GUI Application
 // ============================================================
-struct AppState {
+pub(crate) struct AppState {
     pub(crate) mode: AppMode,
     pub(crate) session: SessionState,
     pub(crate) status_text: String,
