@@ -1,0 +1,177 @@
+//! Transparent TLS certificate management (generated on first run).
+
+// ============================================================
+// Transparent TLS certificate management
+// ============================================================
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use directories::ProjectDirs;
+use rcgen::{generate_simple_self_signed, CertifiedKey};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::{ClientConfig, ServerConfig};
+
+fn config_dir() -> std::io::Result<PathBuf> {
+    let dirs = ProjectDirs::from("com", "rustdesk-mini", "RustDesk-Mini").ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "cannot determine config directory",
+        )
+    })?;
+    let dir = dirs.config_dir().to_path_buf();
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn cert_path() -> std::io::Result<PathBuf> {
+    Ok(config_dir()?.join("cert.pem"))
+}
+
+fn key_path() -> std::io::Result<PathBuf> {
+    Ok(config_dir()?.join("key.pem"))
+}
+
+/// Ensures a self-signed cert/key pair exists on disk.
+/// Generates them silently on first run.
+pub fn ensure_certificates() -> std::io::Result<(PathBuf, PathBuf)> {
+    let cp = cert_path()?;
+    let kp = key_path()?;
+
+    let needs_generation = !cp.exists() || !kp.exists() || !is_valid_pem(&cp, &kp);
+    if needs_generation {
+        generate_and_write(&cp, &kp)?;
+    }
+    Ok((cp, kp))
+}
+
+fn is_valid_pem(cp: &PathBuf, kp: &PathBuf) -> bool {
+    let cert_ok = fs::read_to_string(cp)
+        .map(|s| s.contains("BEGIN CERTIFICATE") && s.len() > 100)
+        .unwrap_or(false);
+    let key_ok = fs::read_to_string(kp)
+        .map(|s| s.contains("PRIVATE KEY") && s.len() > 100)
+        .unwrap_or(false);
+    cert_ok && key_ok
+}
+
+fn generate_and_write(cp: &PathBuf, kp: &PathBuf) -> std::io::Result<()> {
+    let subject_alt_names = vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+        "rustdesk-mini.local".to_string(),
+    ];
+
+    let CertifiedKey { cert, key_pair } =
+        generate_simple_self_signed(subject_alt_names).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("cert generation failed: {e}"),
+            )
+        })?;
+
+    {
+        let mut f = fs::File::create(cp)?;
+        f.write_all(cert.pem().as_bytes())?;
+        f.sync_all()?;
+    }
+    {
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(kp)?;
+        f.write_all(key_pair.serialize_pem().as_bytes())?;
+        f.sync_all()?;
+    }
+    Ok(())
+}
+
+pub fn server_tls_config() -> Result<Arc<ServerConfig>, String> {
+    let (cp, kp) = ensure_certificates().map_err(|e| e.to_string())?;
+
+    let cert_data = fs::read_to_string(&cp).map_err(|e| format!("read cert: {e}"))?;
+    let key_data = fs::read_to_string(&kp).map_err(|e| format!("read key: {e}"))?;
+
+    let certs: Vec<CertificateDer<'static>> =
+        rustls_pemfile::certs(&mut std::io::BufReader::new(cert_data.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("parse cert: {e}"))?;
+
+    let key: PrivateKeyDer<'static> =
+        rustls_pemfile::private_key(&mut std::io::BufReader::new(key_data.as_bytes()))
+            .map_err(|e| format!("parse key: {e}"))?
+            .ok_or_else(|| "no private key found".to_string())?;
+
+    let cfg = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| format!("ServerConfig: {e}"))?;
+
+    Ok(Arc::new(cfg))
+}
+
+/// Client config that accepts any server certificate.
+/// Trade-off: TLS 1.3 encryption is still active, but no chain validation.
+/// Same model as AnyDesk on LAN without an account.
+pub fn client_tls_config() -> Result<Arc<ClientConfig>, String> {
+    let config = ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoVerifier))
+        .with_no_client_auth();
+    Ok(Arc::new(config))
+}
+
+#[derive(Debug)]
+struct NoVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for NoVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        use rustls::SignatureScheme::*;
+        vec![
+            RSA_PKCS1_SHA256,
+            RSA_PKCS1_SHA384,
+            RSA_PKCS1_SHA512,
+            ECDSA_NISTP256_SHA256,
+            ECDSA_NISTP384_SHA384,
+            ED25519,
+            RSA_PSS_SHA256,
+            RSA_PSS_SHA384,
+            RSA_PSS_SHA512,
+        ]
+    }
+}
