@@ -2,13 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-// ------------------------------------------------------------
-// Protocol constants
-// ------------------------------------------------------------
-pub(crate) const FEC_DATA_SHARDS: usize = 8;
-pub(crate) const FEC_PARITY_SHARDS: usize = 2;
-pub(crate) const FEC_SHARD_SIZE: usize = 1200;
-pub(crate) const MAX_UDP_PAYLOAD: usize = 1400;
+/// Address of the relay server. Set this to the public address of your server
+/// before building the client, e.g. "relay.example.com:9443".
+pub(crate) const RELAY_ADDR: &str = "relay.example.com:9443";
 
 // ------------------------------------------------------------
 // Input event protocol
@@ -24,9 +20,11 @@ pub(crate) enum InputEvent {
 }
 
 // ------------------------------------------------------------
-// Messages between backend threads and GUI
+// Messages between backend threads and the GUI
 // ------------------------------------------------------------
 pub(crate) enum BackendMsg {
+    /// Host: registered with the relay; carries this device's ID, already formatted.
+    HostReady(String),
     Status(String),
     Error(String),
     Frame {
@@ -42,16 +40,10 @@ pub(crate) enum BackendMsg {
     Disconnected,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AppMode {
-    Host,
-    Client,
-}
-
+/// State of the remote-control session (this device controlling another).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SessionState {
     Idle,
-    Listening,
     Connecting,
     Connected,
     Error,

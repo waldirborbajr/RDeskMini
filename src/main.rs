@@ -1,57 +1,27 @@
 // ============================================================
-// RDeskMini — native remote desktop (eframe/egui), Linux, Windows and macOS.
-// Usage:
-//   rdeskmini --mode host            (default)
-//   rdeskmini --mode client
-//   rdeskmini --lang pt              (Portuguese UI)
+// RDeskMini — free remote desktop (eframe/egui), Linux, Windows and macOS.
+// Run it on both computers. Each one shows its own connection code;
+// type the other computer's code to control it.
 // ============================================================
 
 mod app;
 mod cert;
 mod client;
-mod fec;
 mod host;
 mod i18n;
+mod identity;
 mod input;
 mod protocol;
+mod relay_proto;
 mod video;
 
+use app::AppState;
 use eframe::egui;
 
-use app::AppState;
-use protocol::AppMode;
-
-// ============================================================
-// Main
-// ============================================================
 fn main() -> eframe::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut initial_mode = AppMode::Host;
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--mode" | "-m" if i + 1 < args.len() => {
-                initial_mode = match args[i + 1].as_str() {
-                    "client" | "c" => AppMode::Client,
-                    _ => AppMode::Host,
-                };
-                i += 2;
-            }
-            "--lang" | "-l" if i + 1 < args.len() => {
-                match args[i + 1].as_str() {
-                    "pt" | "pt-BR" | "portuguese" => {
-                        i18n::set_language(i18n::Language::Portuguese);
-                    }
-                    _ => i18n::set_language(i18n::Language::English),
-                }
-                i += 2;
-            }
-            _ => i += 1,
-        }
-    }
+    i18n::set_language(i18n::detect_language());
 
-    // Ensure TLS certificates exist before anything else.
-    // Transparent to the user: generated on first run, reused thereafter.
+    // TLS certificates are created on the first run and reused afterwards.
     if let Err(e) = cert::ensure_certificates() {
         eprintln!("Failed to prepare TLS certificates: {e}");
     }
@@ -60,18 +30,16 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 700.0])
             .with_min_inner_size([700.0, 500.0])
-            .with_title("RustDesk-Mini"),
+            .with_title("RDeskMini"),
         ..Default::default()
     };
 
     eframe::run_native(
-        "RustDesk-Mini",
+        "RDeskMini",
         options,
-        Box::new(move |_cc| {
+        Box::new(|_cc| {
             let mut app = AppState::default();
-            app.mode = initial_mode;
-            app.language = i18n::current();
-            app.status_text = i18n::t("status_idle").to_string();
+            app.start_hosting();
             Ok(Box::new(app))
         }),
     )

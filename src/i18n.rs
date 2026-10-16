@@ -1,8 +1,5 @@
-//! Internationalization: English by default, Portuguese optional.
+//! Internationalization: English by default, Portuguese when the system language is Portuguese.
 
-// ============================================================
-// i18n — English default, Portuguese optional
-// ============================================================
 use std::sync::atomic::{AtomicU8, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,186 +21,70 @@ pub fn current() -> Language {
     }
 }
 
+/// Picks the Portuguese or English text for the current language.
+fn pick(en: &'static str, pt: &'static str) -> &'static str {
+    if current() == Language::English {
+        en
+    } else {
+        pt
+    }
+}
+
 pub fn t(key: &str) -> &'static str {
-    use Language::*;
-    let en = current() == English;
     match key {
-        "app_title" => "RustDesk-Mini",
-        "this_device_is" => {
-            if en {
-                "This device is:"
-            } else {
-                "Este dispositivo é:"
-            }
-        }
-        "mode_host" => {
-            if en {
-                "Host (waiting for connection)"
-            } else {
-                "Servidor (aguardando conexão)"
-            }
-        }
-        "mode_client" => {
-            if en {
-                "Client (connect to remote)"
-            } else {
-                "Cliente (conectar ao remoto)"
-            }
-        }
-        "your_address" => {
-            if en {
-                "Your address:"
-            } else {
-                "Seu endereço:"
-            }
-        }
-        "remote_address" => {
-            if en {
-                "Remote address:"
-            } else {
-                "Endereço remoto:"
-            }
-        }
-        "remote_addr_hint" => {
-            if en {
-                "e.g. 192.168.0.10:9000"
-            } else {
-                "ex.: 192.168.0.10:9000"
-            }
-        }
-        "connect" => {
-            if en {
-                "Connect"
-            } else {
-                "Conectar"
-            }
-        }
-        "start_hosting" => {
-            if en {
-                "Start hosting"
-            } else {
-                "Iniciar hospedagem"
-            }
-        }
-        "stop_hosting" => {
-            if en {
-                "Stop hosting"
-            } else {
-                "Parar hospedagem"
-            }
-        }
-        "disconnect" => {
-            if en {
-                "Disconnect"
-            } else {
-                "Desconectar"
-            }
-        }
-        "fullscreen" => {
-            if en {
-                "Fullscreen"
-            } else {
-                "Tela cheia"
-            }
-        }
-        "exit_fullscreen" => {
-            if en {
-                "Exit fullscreen"
-            } else {
-                "Sair de tela cheia"
-            }
-        }
-        "fit_to_window" => {
-            if en {
-                "Fit to window"
-            } else {
-                "Ajustar à janela"
-            }
-        }
-        "status_idle" => {
-            if en {
-                "Idle"
-            } else {
-                "Ocioso"
-            }
-        }
-        "status_listening" => {
-            if en {
-                "Listening on {}"
-            } else {
-                "Escutando em {}"
-            }
-        }
-        "status_connecting" => {
-            if en {
-                "Connecting to {}…"
-            } else {
-                "Conectando a {}…"
-            }
-        }
-        "status_connected" => {
-            if en {
-                "Connected to {}"
-            } else {
-                "Conectado a {}"
-            }
-        }
-        "status_error" => {
-            if en {
-                "Error: {}"
-            } else {
-                "Erro: {}"
-            }
-        }
-        "status_disconnected" => {
-            if en {
-                "Disconnected"
-            } else {
-                "Desconectado"
-            }
-        }
-        "fps" => {
-            if en {
-                "FPS:"
-            } else {
-                "FPS:"
-            }
-        }
-        "latency" => {
-            if en {
-                "Latency:"
-            } else {
-                "Latência:"
-            }
-        }
-        "packet_loss" => {
-            if en {
-                "Packet loss:"
-            } else {
-                "Perda de pacotes:"
-            }
-        }
-        "language" => {
-            if en {
-                "Language"
-            } else {
-                "Idioma"
-            }
-        }
-        "waiting_peer" => {
-            if en {
-                "Waiting for peer…"
-            } else {
-                "Aguardando par…"
-            }
-        }
-        "session_active" => {
-            if en {
-                "Session active"
-            } else {
-                "Sessão ativa"
-            }
-        }
+        "app_title" => "RDeskMini",
+        "this_device" => pick("This device", "Este dispositivo"),
+        "your_code_hint" => pick(
+            "Share this ID with the person who needs to connect to you:",
+            "Envie este ID para quem precisa se conectar a você:",
+        ),
+        "copy_code" => pick("Copy ID", "Copiar ID"),
+        "connect_to_device" => pick("Connect to another device", "Conectar a outro dispositivo"),
+        "remote_code_hint" => pick("Enter the ID (123 456 789)", "Digite o ID (123 456 789)"),
+        "connect" => pick("Connect", "Conectar"),
+        "disconnect" => pick("Disconnect", "Desconectar"),
+        "fullscreen" => pick("Fullscreen", "Tela cheia"),
+        "exit_fullscreen" => pick("Exit fullscreen", "Sair de tela cheia"),
+        "fit_to_window" => pick("Fit to window", "Ajustar à janela"),
+        "fps" => "FPS:",
+        "latency" => pick("Latency:", "Latência:"),
+        "packet_loss" => pick("Packet loss:", "Perda de pacotes:"),
+        "language" => pick("Language", "Idioma"),
+        "status_idle" => pick("Ready", "Pronto"),
+        "status_host_ready" => pick(
+            "Ready. Waiting for connections",
+            "Pronto. Aguardando conexões",
+        ),
+        "status_peer_connected" => pick(
+            "Being controlled by another computer",
+            "Sendo controlado por outro computador",
+        ),
+        "status_relay_offline" => pick(
+            "Server unavailable, retrying… ({})",
+            "Servidor indisponível, tentando de novo… ({})",
+        ),
+        "status_connecting" => pick("Connecting to {}…", "Conectando a {}…"),
+        "status_connected" => pick("Connected to {}", "Conectado a {}"),
+        "status_session_ended" => pick("Session ended: {}", "Sessão encerrada: {}"),
+        "status_disconnected" => pick("Disconnected", "Desconectado"),
+        "status_error" => pick("Error: {}", "Erro: {}"),
+        "invalid_code" => pick(
+            "Invalid ID. It has 9 digits.",
+            "ID inválido. Ele tem 9 dígitos.",
+        ),
+        "peer_not_found" => pick("This ID is not online", "Este ID não está online"),
         _ => "[?]",
+    }
+}
+
+/// Language from the environment: Portuguese when LANG or LC_ALL starts with "pt".
+pub fn detect_language() -> Language {
+    let env_lang = std::env::var("LC_ALL")
+        .or_else(|_| std::env::var("LANG"))
+        .unwrap_or_default();
+    if env_lang.to_lowercase().starts_with("pt") {
+        Language::Portuguese
+    } else {
+        Language::English
     }
 }

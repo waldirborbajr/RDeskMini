@@ -13,7 +13,7 @@ The target audience is people who are not technical. The interface should be sim
 ## Features (current)
 
 - **Host and client modes**: the host shares its screen, and the client controls it.
-- **Screen streaming** with H.264 video over UDP, with Reed-Solomon forward error correction to tolerate packet loss.
+- **Screen streaming** with H.264 video, sent over TCP through the relay server.
 - **Mouse and keyboard control** on the remote computer.
 - **Encrypted control channel** (TLS). The certificate is created automatically on the first run, with no manual steps.
 - **English and Portuguese** interface.
@@ -60,29 +60,26 @@ With [`just`](https://github.com/casey/just) installed, run `just` to list all t
 
 ## Usage
 
-Start the program on both computers.
+Open RDeskMini on both computers. There is nothing to configure on the computers.
 
-1. On the computer you want to **control**, open RDeskMini in the **client** mode.
-2. On the computer you want to **share**, keep RDeskMini in the **host** mode (the default). Note its IP address on the local network.
-3. In the client, type the host address, for example `192.168.0.10:9000`, and connect.
+1. Each computer shows its own **ID**, for example `123 456 789`.
+2. To control a computer, type its ID in **Connect to another device** and click **Connect**.
+3. Use **Copy ID** to send your ID to the other person.
 
-Command-line options:
+Both computers connect through the relay server, so they work from different networks, including over the internet. The video and the keyboard/mouse input are encrypted end to end; the server only passes them along.
 
-```text
-rdeskmini [--mode host|client] [--lang en|pt]
+Language: RDeskMini uses Portuguese when the system language is Portuguese, and English otherwise. You can change it in the top-right corner.
 
-  -m, --mode   host (default) or client
-  -l, --lang   en (default) or pt for Portuguese
-```
+## Relay server
 
-The default port is `9000`.
+The relay server pairs the two computers. It runs on any machine with a public address (for example a small VPS).
 
-Run from source:
+1. Build it: `just server-build`. The binary is `server/target/release/rdesk-relay`.
+2. Open TCP port **9443** in the server's firewall.
+3. Run it: `./rdesk-relay`. To keep it running after a reboot, create a systemd service that runs it.
+4. Set `RELAY_ADDR` in `src/protocol.rs` to your server's address (for example `relay.example.com:9443`) before building RDeskMini.
 
-```bash
-cargo run --release -- --mode host
-cargo run --release -- --mode client --lang pt
-```
+The relay does not store any traffic and does not decrypt it. It does not yet authenticate hosts, so anyone who knows an ID can connect to that computer. Passwords and access approval are on the roadmap.
 
 ## Architecture
 
@@ -90,21 +87,22 @@ The code is split by responsibility. Each module does one job.
 
 | Module | Responsibility |
 |---|---|
-| `main.rs` | Entry point: reads the command line, prepares the certificates, and starts the GUI. |
+| `main.rs` | Entry point: detects the language, prepares the certificates, and starts the GUI with the host running. |
 | `app.rs` | GUI state and rendering with egui. Starts and stops the backends. |
-| `host.rs` | Host side: captures the screen, streams video, and receives input events. |
-| `client.rs` | Client side: connects to a host, shows the video, and sends input events. |
+| `host.rs` | Host side: registers with the relay, then streams the screen and applies the controller's input. |
+| `client.rs` | Controller side: requests a session by ID, shows the remote screen and sends input. |
 | `protocol.rs` | Shared constants, messages between threads and the GUI, and session types. |
-| `fec.rs` | Reed-Solomon forward error correction for UDP datagrams. |
+| `relay_proto.rs` | Messages between the apps and the relay server. |
 | `video.rs` | H.264 encoding and decoding, and RGB/YUV conversion. |
 | `input.rs` | Applies mouse and keyboard events, and maps GUI keys to key codes. |
+| `identity.rs` | Formats and reads the 9-digit IDs. |
 | `cert.rs` | Creates and loads the TLS certificate for the control channel. |
 | `i18n.rs` | Translations (English and Portuguese). |
 
 ### How it works
 
 - **Control channel**: a TLS connection over TCP. The client sends commands such as connect and input events, and the host replies.
-- **Video channel**: H.264 frames split into UDP datagrams. Each group of 8 data shards has 2 parity shards, so lost packets can be rebuilt without retransmission.
+- **Video channel**: each H.264 frame is sent as one length-prefixed message over TCP.
 - **Input**: mouse and keyboard events are sent from the client and applied on the host with `enigo`.
 
 Certificates are stored in the per-user configuration directory (`ProjectDirs` with the `com.rustdesk-mini` identifier, see the roadmap item about renaming).
@@ -115,7 +113,7 @@ Common tasks with `just`:
 
 | Recipe | What it does |
 |---|---|
-| `just run-host` / `just run-client` | Run in host or client mode |
+| `just run` | Run RDeskMini |
 | `just build` | Release build |
 | `just package` | Release build copied to `dist/` |
 | `just check` | Formatting, clippy and tests |

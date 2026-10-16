@@ -24,21 +24,17 @@ build:
 build-debug:
     cargo build --locked
 
-# Run the host (the computer being controlled)
-run-host:
-    cargo run --locked -- --mode host
+# Run RDeskMini (it both shares this computer and can control another one)
+run:
+    cargo run --locked
 
-# Run the client (the computer that controls)
-run-client:
-    cargo run --locked -- --mode client
+# Build the relay server (run it on a machine with a public address)
+server-build:
+    cd server && cargo build --release
 
-# Run the host with the Portuguese interface
-run-host-pt:
-    cargo run --locked -- --mode host --lang pt
-
-# Run the client with the Portuguese interface
-run-client-pt:
-    cargo run --locked -- --mode client --lang pt
+# Run the relay server locally for testing
+server-run:
+    cd server && cargo run --release
 
 # Package the release binary as dist/rdeskmini-<version>-<os>-<arch>
 package: build
