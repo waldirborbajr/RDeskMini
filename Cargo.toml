@@ -1,5 +1,5 @@
 [package]
-name = "rdeskmini"
+name = "RDeskMini"
 version = "0.1.0"
 edition     = "2024"
 rust-version = "1.90"
@@ -8,6 +8,10 @@ license     = "GPL-3.0-only"
 repository  = "https://github.com/waldirborbajr/RDeskMini"
 authors     = ["Waldir Borba Junior <wborbajr@gmail.com>"]
 readme      = "README.md"
+
+[[bin]]
+name = "rdeskmini"
+path = "src/main.rs"
 
 [dependencies]
 eframe = { version = "0.29", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
@@ -27,6 +31,22 @@ openh264 = "0.6"
 reed-solomon-erasure = "6"
 
 [profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
+opt-level       = "z"       # optimize for size
+lto             = "fat"     # cross-crate LTO (strongest)
+codegen-units   = 1         # best optimization, slowest build
+panic           = "abort"   # drop unwinding machinery
+strip           = "symbols" # strip all symbols (best of both worlds)
+debug           = false
+incremental     = false
+overflow-checks = false
+debug-assertions = false
+rpath           = false
+
+# Optional: only if you don't need a fast link step during dev
+[profile.dev]
+panic     = "abort"
+strip     = "none"
+
+# Optional: even leaner final binary for CI releases
+[profile.release.package."*"]
+opt-level = "z"
