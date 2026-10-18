@@ -55,7 +55,7 @@ fn register_and_serve(tx: &Sender<BackendMsg>) -> std::io::Result<()> {
                 let _ = tx.send(BackendMsg::Status(
                     i18n::t("status_peer_connected").to_string(),
                 ));
-                if let Err(e) = serve_session(session, &tx) {
+                if let Err(e) = serve_session(session) {
                     let _ = tx.send(BackendMsg::Status(
                         i18n::t("status_session_ended").replace("{}", &e.to_string()),
                     ));
@@ -67,7 +67,7 @@ fn register_and_serve(tx: &Sender<BackendMsg>) -> std::io::Result<()> {
 }
 
 /// Opens the video and input connections of one session and runs them until the controller leaves.
-fn serve_session(session: u64, tx: &Sender<BackendMsg>) -> std::io::Result<()> {
+fn serve_session(session: u64) -> std::io::Result<()> {
     let video = open_accept(session, Channel::Video)?;
     let input = open_accept(session, Channel::Input)?;
 
@@ -139,7 +139,7 @@ fn stream_video(
         // The capture is RGBA (4 bytes per pixel); the encoder wants RGB (3 bytes).
         let rgb: Vec<u8> = img
             .into_raw()
-            .chunks_exact(4)
+            .as_chunks::<4>().0.iter()
             .flat_map(|p| [p[0], p[1], p[2]])
             .collect();
         if rgb.len() != (sw * sh * 3) as usize {

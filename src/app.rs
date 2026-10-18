@@ -207,8 +207,8 @@ impl AppState {
             }
             ctx.input(|i| {
                 for ev in &i.events {
-                    if let egui::Event::Key { key, pressed, .. } = ev {
-                        if let Some(code) = egui_key_to_code(*key) {
+                    if let egui::Event::Key { key, pressed, .. } = ev
+                        && let Some(code) = egui_key_to_code(*key) {
                             let msg = if *pressed {
                                 InputEvent::KeyDown { code }
                             } else {
@@ -216,7 +216,6 @@ impl AppState {
                             };
                             let _ = input_tx.send(msg);
                         }
-                    }
                 }
             });
         }

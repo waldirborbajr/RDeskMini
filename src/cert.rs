@@ -66,8 +66,7 @@ fn generate_and_write(cp: &PathBuf, kp: &PathBuf) -> std::io::Result<()> {
 
     let CertifiedKey { cert, key_pair } =
         generate_simple_self_signed(subject_alt_names).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
+            std::io::Error::other(
                 format!("cert generation failed: {e}"),
             )
         })?;
