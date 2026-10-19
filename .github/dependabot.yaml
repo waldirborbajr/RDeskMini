@@ -1,0 +1,48 @@
+# Dependabot configuration for noipclient
+version: 2
+
+updates:
+  # Rust dependencies (Cargo)
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "rust"
+    reviewers:
+      - "waldirborbajr"
+    # Skip major version bumps; review them by hand.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    # Group patch and minor updates to reduce PR noise.
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions (also covers this file)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    reviewers:
+      - "waldirborbajr"
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
