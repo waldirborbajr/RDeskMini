@@ -15,6 +15,7 @@ dependencies = [
  "openh264",
  "rcgen",
  "reed-solomon-erasure",
+ "ring",
  "rustls",
  "rustls-pemfile",
  "rustls-pki-types",

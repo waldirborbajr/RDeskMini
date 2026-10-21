@@ -26,13 +26,14 @@ fn io_err<E: std::fmt::Display>(e: E) -> std::io::Error {
 
 pub(crate) fn spawn_client_backend(
     id: String,
+    expected_fingerprint: [u8; 32],
     tx: Sender<BackendMsg>,
     input_rx: Receiver<InputEvent>,
 ) -> Arc<AtomicBool> {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_clone = stop.clone();
     thread::spawn(move || {
-        if let Err(e) = run_client(&id, tx.clone(), stop_clone, input_rx) {
+        if let Err(e) = run_client(&id, expected_fingerprint, tx.clone(), stop_clone, input_rx) {
             let _ = tx.send(BackendMsg::Error(e.to_string()));
         }
         let _ = tx.send(BackendMsg::Disconnected);
@@ -42,6 +43,7 @@ pub(crate) fn spawn_client_backend(
 
 fn run_client(
     id: &str,
+    expected_fingerprint: [u8; 32],
     tx: Sender<BackendMsg>,
     stop: Arc<AtomicBool>,
     input_rx: Receiver<InputEvent>,
@@ -51,10 +53,11 @@ fn run_client(
     ));
 
     let session = request_session(id)?;
-    let (mut video, video_raw) = open_join(session, Channel::Video)?;
-    let (mut input, input_raw) = open_join(session, Channel::Input)?;
+    let (mut video, video_raw) = open_join(session, Channel::Video, expected_fingerprint)?;
+    let (mut input, input_raw) = open_join(session, Channel::Input, expected_fingerprint)?;
     let _ = tx.send(BackendMsg::Status(
-        i18n::t("status_connected").replace("{}", &format_id(id)),
+        i18n::t("status_waiting_approval")
+            .replace("{}", &format_id(id)),
     ));
 
     let over = Arc::new(AtomicBool::new(false));
@@ -102,7 +105,7 @@ fn run_client(
         over_w.store(true, Ordering::SeqCst);
     });
 
-    let result = receive_video(&mut video, &tx, &over);
+    let result = receive_video(&mut video, &tx, &over, id);
     over.store(true, Ordering::SeqCst);
     result
 }
@@ -124,12 +127,15 @@ fn request_session(id: &str) -> std::io::Result<u64> {
 fn open_join(
     session: u64,
     channel: Channel,
+    expected_fingerprint: [u8; 32],
 ) -> std::io::Result<(StreamOwned<ClientConnection, TcpStream>, TcpStream)> {
     let mut sock = TcpStream::connect(RELAY_ADDR)?;
     sock.set_nodelay(true)?;
+    sock.set_read_timeout(Some(Duration::from_secs(35)))?;
+    sock.set_write_timeout(Some(Duration::from_secs(35)))?;
     write_msg(&mut sock, &Hello::Join { session, channel })?;
     let raw = sock.try_clone()?;
-    let tls_cfg = cert::client_tls_config().map_err(io_err)?;
+    let tls_cfg = cert::client_tls_config(expected_fingerprint);
     let sni = rustls::pki_types::ServerName::try_from("localhost")
         .map_err(io_err)?
         .to_owned();
@@ -138,6 +144,8 @@ fn open_join(
     tls.conn
         .complete_io(&mut tls.sock)
         .map_err(|e| io_err(format!("TLS: {e}")))?;
+    tls.sock.set_read_timeout(None)?;
+    tls.sock.set_write_timeout(None)?;
     Ok((tls, raw))
 }
 
@@ -146,17 +154,28 @@ fn receive_video(
     video: &mut StreamOwned<ClientConnection, TcpStream>,
     tx: &Sender<BackendMsg>,
     over: &Arc<AtomicBool>,
+    id: &str,
 ) -> std::io::Result<()> {
     let mut decoder = openh264::decoder::Decoder::new().map_err(io_err)?;
     let mut frames: u32 = 0;
     let mut last = Instant::now();
+    let mut announced_connected = false;
 
     while !over.load(Ordering::SeqCst) {
         match read_frame(video) {
+            Ok(payload) if payload.is_empty() => {
+                return Err(io_err(i18n::t("status_request_denied_remote")));
+            }
             Ok(payload) => {
                 if let Ok(Some(yuv)) = decoder.decode(&payload) {
                     let (w, h) = yuv.dimensions();
                     let rgb = yuv_to_rgb(&yuv);
+                    if !announced_connected {
+                        let _ = tx.send(BackendMsg::Status(
+                            i18n::t("status_connected").replace("{}", &format_id(id)),
+                        ));
+                        announced_connected = true;
+                    }
                     let _ = tx.send(BackendMsg::Frame {
                         width: w as u32,
                         height: h as u32,

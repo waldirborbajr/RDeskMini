@@ -1,6 +1,8 @@
 //! Shared constants, messages between threads and the GUI, and session types.
 
 use serde::{Deserialize, Serialize};
+use std::sync::mpsc::Sender;
+use std::time::Instant;
 
 /// Address of the relay server. Set this to the public address of your server
 /// before building the client, e.g. "relay.example.com:9443".
@@ -25,6 +27,10 @@ pub(crate) enum InputEvent {
 pub(crate) enum BackendMsg {
     /// Host: registered with the relay; carries this device's ID, already formatted.
     HostReady(String),
+    IncomingRequest {
+        approval: Sender<bool>,
+        expires_at: Instant,
+    },
     Status(String),
     Error(String),
     Frame {

@@ -13,6 +13,8 @@ use rcgen::{generate_simple_self_signed, CertifiedKey};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, ServerConfig};
 
+const FINGERPRINT_LENGTH: usize = 32;
+
 fn config_dir() -> std::io::Result<PathBuf> {
     let dirs = ProjectDirs::from("com", "rustdesk-mini", "RustDesk-Mini").ok_or_else(|| {
         std::io::Error::new(
@@ -115,62 +117,133 @@ pub fn server_tls_config() -> Result<Arc<ServerConfig>, String> {
     Ok(Arc::new(cfg))
 }
 
-/// Client config that accepts any server certificate.
-/// Trade-off: TLS 1.3 encryption is still active, but no chain validation.
-/// Same model as AnyDesk on LAN without an account.
-pub fn client_tls_config() -> Result<Arc<ClientConfig>, String> {
+pub fn certificate_fingerprint() -> Result<String, String> {
+    let (cp, _) = ensure_certificates().map_err(|e| e.to_string())?;
+    let cert_data = fs::read_to_string(cp).map_err(|e| format!("read cert: {e}"))?;
+    let cert = rustls_pemfile::certs(&mut std::io::BufReader::new(cert_data.as_bytes()))
+        .next()
+        .ok_or_else(|| "no certificate found".to_string())?
+        .map_err(|e| format!("parse cert: {e}"))?;
+    let fingerprint = ring::digest::digest(&ring::digest::SHA256, cert.as_ref());
+    Ok(format_fingerprint(fingerprint.as_ref()))
+}
+
+fn format_fingerprint(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+pub(crate) fn parse_fingerprint(input: &str) -> Option<[u8; FINGERPRINT_LENGTH]> {
+    let hex: String = input
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != ':' && *ch != '-')
+        .collect();
+    if hex.len() != FINGERPRINT_LENGTH * 2 || !hex.is_ascii() {
+        return None;
+    }
+
+    let mut fingerprint = [0; FINGERPRINT_LENGTH];
+    for (index, byte) in fingerprint.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(fingerprint)
+}
+
+pub fn client_tls_config(expected_fingerprint: [u8; FINGERPRINT_LENGTH]) -> Arc<ClientConfig> {
     let config = ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(NoVerifier))
+        .with_custom_certificate_verifier(Arc::new(FingerprintVerifier {
+            expected_fingerprint,
+        }))
         .with_no_client_auth();
-    Ok(Arc::new(config))
+    Arc::new(config)
 }
 
 #[derive(Debug)]
-struct NoVerifier;
+struct FingerprintVerifier {
+    expected_fingerprint: [u8; FINGERPRINT_LENGTH],
+}
 
-impl rustls::client::danger::ServerCertVerifier for NoVerifier {
+impl rustls::client::danger::ServerCertVerifier for FingerprintVerifier {
     fn verify_server_cert(
         &self,
-        _end_entity: &CertificateDer<'_>,
+        end_entity: &CertificateDer<'_>,
         _intermediates: &[CertificateDer<'_>],
         _server_name: &rustls::pki_types::ServerName<'_>,
         _ocsp_response: &[u8],
         _now: rustls::pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        let actual = ring::digest::digest(&ring::digest::SHA256, end_entity.as_ref());
+        ring::constant_time::verify_slices_are_equal(
+            actual.as_ref(),
+            &self.expected_fingerprint,
+        )
+        .map_err(|_| rustls::Error::General("host certificate fingerprint mismatch".into()))?;
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::aws_lc_rs::default_provider().signature_verification_algorithms,
+        )
     }
 
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::aws_lc_rs::default_provider().signature_verification_algorithms,
+        )
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        use rustls::SignatureScheme::*;
-        vec![
-            RSA_PKCS1_SHA256,
-            RSA_PKCS1_SHA384,
-            RSA_PKCS1_SHA512,
-            ECDSA_NISTP256_SHA256,
-            ECDSA_NISTP384_SHA384,
-            ED25519,
-            RSA_PSS_SHA256,
-            RSA_PSS_SHA384,
-            RSA_PSS_SHA512,
-        ]
+        rustls::crypto::aws_lc_rs::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_colon_separated_sha256_fingerprint() {
+        let parsed = parse_fingerprint(
+            "00:01:02:03:04:05:06:07:08:09:0A:0B:0C:0D:0E:0F:10:11:12:13:14:15:16:17:18:19:1A:1B:1C:1D:1E:1F",
+        );
+        assert_eq!(parsed, Some(std::array::from_fn(|i| i as u8)));
+    }
+
+    #[test]
+    fn accepts_fingerprint_with_hyphens_and_lowercase() {
+        let parsed = parse_fingerprint(
+            "00010203-04050607-08090a0b-0c0d0e0f-10111213-14151617-18191a1b-1c1d1e1f",
+        );
+        assert_eq!(parsed, Some(std::array::from_fn(|i| i as u8)));
+    }
+
+    #[test]
+    fn rejects_malformed_fingerprints() {
+        assert_eq!(parse_fingerprint("00:01"), None);
+        assert_eq!(parse_fingerprint(&"GG".repeat(FINGERPRINT_LENGTH)), None);
+        assert_eq!(parse_fingerprint(&"é".repeat(FINGERPRINT_LENGTH)), None);
     }
 }

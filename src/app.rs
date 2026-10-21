@@ -5,7 +5,7 @@ use eframe::egui::{ColorImage, TextureHandle, TextureOptions};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::client::spawn_client_backend;
 use crate::host::spawn_host_backend;
@@ -17,11 +17,14 @@ use crate::protocol::{BackendMsg, InputEvent, SessionState};
 pub(crate) struct AppState {
     // This device, as a host (always on)
     pub(crate) my_code: String,
+    pub(crate) my_fingerprint: String,
     pub(crate) host_status: String,
     pub(crate) host_rx: Option<Receiver<BackendMsg>>,
 
     // Controlling another device (client)
     pub(crate) code_input: String,
+    pub(crate) fingerprint_input: String,
+    pub(crate) pending_approvals: Vec<(Sender<bool>, Instant)>,
     pub(crate) session: SessionState,
     pub(crate) status_text: String,
     pub(crate) client_rx: Option<Receiver<BackendMsg>>,
@@ -40,9 +43,12 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             my_code: String::new(),
+            my_fingerprint: String::new(),
             host_status: i18n::t("status_idle").to_string(),
             host_rx: None,
             code_input: String::new(),
+            fingerprint_input: String::new(),
+            pending_approvals: Vec::new(),
             session: SessionState::Idle,
             status_text: String::new(),
             client_rx: None,
@@ -62,6 +68,13 @@ impl Default for AppState {
 impl AppState {
     /// Starts sharing this device. Runs for the whole life of the program.
     pub(crate) fn start_hosting(&mut self) {
+        match crate::cert::certificate_fingerprint() {
+            Ok(fingerprint) => self.my_fingerprint = fingerprint,
+            Err(e) => {
+                self.host_status = i18n::t("status_error").replace("{}", &e);
+                return;
+            }
+        }
         let (tx, rx) = channel();
         self.host_rx = Some(rx);
         // The host thread keeps running until the program exits.
@@ -92,11 +105,16 @@ impl AppState {
             self.status_text = i18n::t("invalid_code").to_string();
             return;
         };
+        let Some(fingerprint) = crate::cert::parse_fingerprint(&self.fingerprint_input) else {
+            self.session = SessionState::Error;
+            self.status_text = i18n::t("invalid_fingerprint").to_string();
+            return;
+        };
         let (tx, rx) = channel();
         let (input_tx, input_rx) = channel();
         self.client_rx = Some(rx);
         self.input_tx = Some(input_tx);
-        self.client_stop = Some(spawn_client_backend(id.clone(), tx, input_rx));
+        self.client_stop = Some(spawn_client_backend(id.clone(), fingerprint, tx, input_rx));
         self.session = SessionState::Connecting;
         self.status_text = i18n::t("status_connecting").replace("{}", &format_id(&id));
     }
@@ -106,6 +124,10 @@ impl AppState {
         loop {
             match rx.try_recv() {
                 Ok(BackendMsg::HostReady(code)) => self.my_code = code,
+                Ok(BackendMsg::IncomingRequest {
+                    approval,
+                    expires_at,
+                }) => self.pending_approvals.push((approval, expires_at)),
                 Ok(BackendMsg::Status(s)) => self.host_status = s,
                 Ok(BackendMsg::Error(e)) => {
                     self.host_status = i18n::t("status_error").replace("{}", &e)
@@ -159,6 +181,7 @@ impl AppState {
                         finished = true;
                     }
                     Ok(BackendMsg::HostReady(_)) => {}
+                    Ok(BackendMsg::IncomingRequest { .. }) => {}
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
                         finished = true;
@@ -245,6 +268,20 @@ impl AppState {
                 }
                 ui.label(&self.host_status);
             });
+            ui.add_space(8.0);
+            ui.label(i18n::t("host_fingerprint"));
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(&self.my_fingerprint)
+                        .small()
+                        .monospace(),
+                );
+                if ui.button(i18n::t("copy_fingerprint")).clicked()
+                    && !self.my_fingerprint.is_empty()
+                {
+                    ctx.output_mut(|o| o.copied_text = self.my_fingerprint.clone());
+                }
+            });
         });
 
         ui.add_space(16.0);
@@ -270,6 +307,12 @@ impl AppState {
                     self.start_client();
                 }
             });
+            ui.add(
+                egui::TextEdit::singleline(&mut self.fingerprint_input)
+                    .hint_text(i18n::t("remote_fingerprint_hint"))
+                    .desired_width(420.0)
+                    .font(egui::TextStyle::Monospace),
+            );
             if self.session != SessionState::Idle {
                 ui.add_space(4.0);
                 ui.label(&self.status_text);
@@ -289,8 +332,9 @@ impl eframe::App for AppState {
                 ui.heading(i18n::t("app_title"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let lang_label = match i18n::current() {
-                        i18n::Language::English => "🇺🇸 EN",
-                        i18n::Language::Portuguese => "🇧🇷 PT",
+                        i18n::Language::English => "🇺🇸 US_ENG",
+                        i18n::Language::PortugueseBrazil => "🇧🇷 pt_BR",
+                        i18n::Language::Spanish => "🇪🇸 Español",
                     };
                     egui::ComboBox::from_label(i18n::t("language"))
                         .selected_text(lang_label)
@@ -298,7 +342,7 @@ impl eframe::App for AppState {
                             if ui
                                 .selectable_label(
                                     i18n::current() == i18n::Language::English,
-                                    "🇺🇸 English",
+                                    "🇺🇸 US_ENG",
                                 )
                                 .clicked()
                             {
@@ -306,12 +350,21 @@ impl eframe::App for AppState {
                             }
                             if ui
                                 .selectable_label(
-                                    i18n::current() == i18n::Language::Portuguese,
-                                    "🇧🇷 Português",
+                                    i18n::current() == i18n::Language::PortugueseBrazil,
+                                    "🇧🇷 pt_BR",
                                 )
                                 .clicked()
                             {
-                                i18n::set_language(i18n::Language::Portuguese);
+                                i18n::set_language(i18n::Language::PortugueseBrazil);
+                            }
+                            if ui
+                                .selectable_label(
+                                    i18n::current() == i18n::Language::Spanish,
+                                    "🇪🇸 Español",
+                                )
+                                .clicked()
+                            {
+                                i18n::set_language(i18n::Language::Spanish);
                             }
                         });
                 });
@@ -377,5 +430,41 @@ impl eframe::App for AppState {
                 self.home_view(ctx, ui);
             }
         });
+        self.approval_dialog(ctx);
+    }
+}
+
+impl AppState {
+    fn approval_dialog(&mut self, ctx: &egui::Context) {
+        while self
+            .pending_approvals
+            .first()
+            .is_some_and(|(_, expires_at)| *expires_at <= Instant::now())
+        {
+            self.pending_approvals.remove(0);
+        }
+        let Some(_) = self.pending_approvals.first() else {
+            return;
+        };
+
+        let mut decision = None;
+        egui::Window::new(i18n::t("incoming_request"))
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label(i18n::t("incoming_request_body"));
+                ui.horizontal(|ui| {
+                    if ui.button(i18n::t("allow")).clicked() {
+                        decision = Some(true);
+                    }
+                    if ui.button(i18n::t("reject")).clicked() {
+                        decision = Some(false);
+                    }
+                });
+            });
+        if let Some(approved) = decision {
+            let (approval, _) = self.pending_approvals.remove(0);
+            let _ = approval.send(approved);
+        }
     }
 }

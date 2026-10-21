@@ -1,6 +1,6 @@
 [package]
 name = "RDeskMini"
-version = "0.1.0"
+version = "0.1.2"
 edition     = "2024"
 rust-version = "1.90"
 description = "Free alternative to AnyDesk without limitation"
@@ -29,6 +29,7 @@ rcgen = "0.13"
 directories = "5"
 openh264 = "0.6"
 reed-solomon-erasure = "6"
+ring = "0.17"
 
 [profile.release]
 opt-level = 3

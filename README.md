@@ -8,15 +8,16 @@
 
 The target audience is people who are not technical. The interface should be simple, and the program should work by opening a single file, with no installation steps.
 
-> **Status: early prototype (v0.1.x).** Connections are made by typing the IP address of the other computer. There is no password yet and no peer-to-peer discovery yet. Do not expose the port to the internet. See the [Roadmap](#roadmap).
+> **Status: early prototype (v0.1.x).** Connections use a device ID and a manually verified certificate fingerprint. The host must approve each connection. There is no account/password system or peer-to-peer discovery yet. See the [Roadmap](#roadmap).
 
 ## Features (current)
 
 - **Host and client modes**: the host shares its screen, and the client controls it.
 - **Screen streaming** with H.264 video, sent over TCP through the relay server.
 - **Mouse and keyboard control** on the remote computer.
-- **Encrypted control channel** (TLS). The certificate is created automatically on the first run, with no manual steps.
-- **English and Portuguese** interface.
+- **Encrypted and pinned TLS channels**. The certificate is created automatically; users compare its SHA-256 fingerprint out of band.
+- **Host approval** for each incoming control request.
+- **US English, Brazilian Portuguese, and Spanish** interface.
 - **Native GUI** built with egui. No browser or WebView is needed.
 
 ## Roadmap
@@ -26,7 +27,7 @@ These items describe where the project is going. They are not implemented yet.
 1. **Peer discovery**: each computer running RDeskMini shows up in a list of online peers, so users connect by choosing a name instead of typing an IP address.
 2. **Peer-to-peer connections with NAT traversal**: connect computers behind home routers without port forwarding.
 3. **Relay fallback**: when a direct connection is not possible, traffic goes through a relay server.
-4. **Passwords and access approval**: a one-time password, or the host approves each connection.
+4. **Account and password options**: optional one-time passwords and managed access controls.
 5. **Single-file executables**: a download that runs with a double click on Linux, Windows and macOS.
 6. **Simple user interface**: large buttons, plain language, and guided steps for non-technical users.
 7. **Rename** the internal identifiers (`RustDesk-Mini`, `rustdesk-mini`) to `RDeskMini`.
@@ -60,15 +61,16 @@ With [`just`](https://github.com/casey/just) installed, run `just` to list all t
 
 ## Usage
 
-Open RDeskMini on both computers. There is nothing to configure on the computers.
+Open RDeskMini on both computers.
 
-1. Each computer shows its own **ID**, for example `123 456 789`.
-2. To control a computer, type its ID in **Connect to another device** and click **Connect**.
-3. Use **Copy ID** to send your ID to the other person.
+1. The host shares its **ID** and **SHA-256 fingerprint** with the controller.
+2. Verify the fingerprint with the host through a separate trusted channel (for example, a phone call). Do not trust a fingerprint supplied only through the same untrusted relay or chat.
+3. The controller enters the ID and verified fingerprint in **Connect to another device**, then clicks **Connect**.
+4. The host explicitly chooses **Allow** or **Reject**. Requests expire after 30 seconds.
 
-Both computers connect through the relay server, so they work from different networks, including over the internet. The video and the keyboard/mouse input are encrypted end to end; the server only passes them along.
+Both computers connect through the relay server, so they can work from different networks. TLS protects the video and input in transit, and the controller verifies the host certificate against the fingerprint. The relay passes encrypted traffic but can observe connection metadata and can deny service.
 
-Language: RDeskMini uses Portuguese when the system language is Portuguese, and English otherwise. You can change it in the top-right corner.
+Language: RDeskMini detects Brazilian Portuguese (`pt_BR`) or Spanish (`es`) from the system locale, and defaults to US English. You can change the language in the top-right corner.
 
 ## Relay server
 
@@ -79,7 +81,7 @@ The relay server pairs the two computers. It runs on any machine with a public a
 3. Run it: `./rdesk-relay`. To keep it running after a reboot, create a systemd service that runs it.
 4. Set `RELAY_ADDR` in `src/protocol.rs` to your server's address (for example `relay.example.com:9443`) before building RDeskMini.
 
-The relay does not store any traffic and does not decrypt it. It does not yet authenticate hosts, so anyone who knows an ID can connect to that computer. Passwords and access approval are on the roadmap.
+The relay does not store traffic or decrypt session data. It assigns IDs but does not authenticate an ID-to-host mapping; controllers authenticate the host by comparing its certificate fingerprint through a separate trusted channel. Knowing an ID alone does not grant control: the host must approve each connection. The relay is still a prototype and does not yet provide production-grade abuse protection or availability.
 
 ## Architecture
 
@@ -97,7 +99,7 @@ The code is split by responsibility. Each module does one job.
 | `input.rs` | Applies mouse and keyboard events, and maps GUI keys to key codes. |
 | `identity.rs` | Formats and reads the 9-digit IDs. |
 | `cert.rs` | Creates and loads the TLS certificate for the control channel. |
-| `i18n.rs` | Translations (English and Portuguese). |
+| `i18n.rs` | Translations (US English, Brazilian Portuguese, and Spanish). |
 
 ### How it works
 
@@ -124,11 +126,11 @@ Common tasks with `just`:
 
 ## Security
 
-RDeskMini is **not ready for untrusted networks yet**:
+RDeskMini is still an early prototype. Before connecting, compare the displayed certificate fingerprint through a trusted channel:
 
-- There is no password or approval step, so anyone who can reach the host port can request a connection.
-- Only use it on networks you trust, such as your own home network, until passwords are implemented.
-- The control channel is encrypted with TLS, but the certificate is self-signed and generated locally.
+- The host must approve every request, but there is no account or password system.
+- The relay can observe metadata, block connections, or attempt impersonation if users do not verify the fingerprint independently.
+- Use only relays you trust; the relay has no rate limiting or production-grade abuse controls yet.
 
 Please report security problems privately before opening a public issue.
 

@@ -7,7 +7,7 @@ use screenshots::Screen;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -52,10 +52,7 @@ fn register_and_serve(tx: &Sender<BackendMsg>) -> std::io::Result<()> {
         if let Reply::Incoming { session } = read_msg::<Reply>(&mut reg)? {
             let tx = tx.clone();
             thread::spawn(move || {
-                let _ = tx.send(BackendMsg::Status(
-                    i18n::t("status_peer_connected").to_string(),
-                ));
-                if let Err(e) = serve_session(session) {
+                if let Err(e) = serve_session(session, &tx) {
                     let _ = tx.send(BackendMsg::Status(
                         i18n::t("status_session_ended").replace("{}", &e.to_string()),
                     ));
@@ -67,9 +64,35 @@ fn register_and_serve(tx: &Sender<BackendMsg>) -> std::io::Result<()> {
 }
 
 /// Opens the video and input connections of one session and runs them until the controller leaves.
-fn serve_session(session: u64) -> std::io::Result<()> {
-    let video = open_accept(session, Channel::Video)?;
-    let input = open_accept(session, Channel::Input)?;
+fn serve_session(session: u64, tx: &Sender<BackendMsg>) -> std::io::Result<()> {
+    let mut video = open_accept(session, Channel::Video)?;
+    let mut input = open_accept(session, Channel::Input)?;
+
+    let (approval_tx, approval_rx) = mpsc::channel();
+    let expires_at = Instant::now() + Duration::from_secs(30);
+    tx.send(BackendMsg::IncomingRequest {
+        approval: approval_tx,
+        expires_at,
+    })
+    .map_err(io_err)?;
+    match approval_rx.recv_timeout(Duration::from_secs(30)) {
+        Ok(true) => {}
+        Ok(false) => {
+            send_request_denied(&mut video);
+            return Err(io_err(i18n::t("status_request_rejected")));
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            send_request_denied(&mut video);
+            return Err(io_err(i18n::t("status_request_expired")));
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            send_request_denied(&mut video);
+            return Err(io_err(i18n::t("status_request_expired")));
+        }
+    }
+    let _ = tx.send(BackendMsg::Status(
+        i18n::t("status_peer_connected").to_string(),
+    ));
 
     let stop = Arc::new(AtomicBool::new(false));
     let video_stop = stop.clone();
@@ -79,6 +102,10 @@ fn serve_session(session: u64) -> std::io::Result<()> {
     stop.store(true, Ordering::SeqCst);
     let _ = video_thread.join();
     result
+}
+
+fn send_request_denied(video: &mut StreamOwned<ServerConnection, TcpStream>) {
+    let _ = video.write_all(&0u32.to_be_bytes()).and_then(|_| video.flush());
 }
 
 /// Joins the relay on one channel of a session and completes the TLS handshake (host is the TLS server).
