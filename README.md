@@ -57,7 +57,7 @@ cargo build --release
 
 The binary is written to `target/release/rdeskmini` (`rdeskmini.exe` on Windows).
 
-With [`just`](https://github.com/casey/just) installed, run `just` to list all tasks. For example, `just package` builds and copies the binary to `dist/rdeskmini-<version>-<os>-<arch>`.
+With [`just`](https://github.com/casey/just) installed, run `just` to list all tasks. For example, `just package` builds and copies the native binary to `dist/`. On a Windows machine with the MSVC Rust toolchain installed, run `just package-windows` to create `dist/rdeskmini-<version>-windows-x86_64.exe`. The Windows target is also available as `just build-windows`.
 
 ## Usage
 

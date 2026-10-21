@@ -8,6 +8,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 bin     := "rdeskmini"
 version := `grep -m1 '^version' Cargo.toml | cut -d'"' -f2`
 exe     := if os() == "windows" { ".exe" } else { "" }
+windows_target := "x86_64-pc-windows-msvc"
 dist    := "dist"
 
 default:
@@ -19,6 +20,11 @@ default:
 build:
     cargo build --release --locked
     @echo "Built target/release/{{bin}}{{exe}}"
+
+# Release build for 64-bit Windows (run on Windows with the MSVC toolchain)
+build-windows:
+    cargo build --release --locked --target {{windows_target}}
+    @echo "Built target/{{windows_target}}/release/{{bin}}.exe"
 
 # Debug build
 build-debug:
@@ -41,6 +47,12 @@ package: build
     mkdir -p {{dist}}
     cp target/release/{{bin}}{{exe}} {{dist}}/{{bin}}-{{version}}-{{os()}}-{{arch()}}{{exe}}
     @echo "Packaged {{dist}}/{{bin}}-{{version}}-{{os()}}-{{arch()}}{{exe}}"
+
+# Package the 64-bit Windows release binary
+package-windows: build-windows
+    mkdir -p {{dist}}
+    cp target/{{windows_target}}/release/{{bin}}.exe {{dist}}/{{bin}}-{{version}}-windows-x86_64.exe
+    @echo "Packaged {{dist}}/{{bin}}-{{version}}-windows-x86_64.exe"
 
 # === Quality & Linting ===
 
