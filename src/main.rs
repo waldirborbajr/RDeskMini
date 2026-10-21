@@ -18,6 +18,12 @@ mod video;
 use app::AppState;
 use eframe::egui;
 
+pub(crate) const APP_TITLE: &str = concat!(
+    env!("CARGO_PKG_NAME"),
+    " v",
+    env!("CARGO_PKG_VERSION")
+);
+
 fn main() -> eframe::Result<()> {
     i18n::set_language(i18n::detect_language());
 
@@ -30,12 +36,12 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 700.0])
             .with_min_inner_size([700.0, 500.0])
-            .with_title("RDeskMini"),
+            .with_title(APP_TITLE),
         ..Default::default()
     };
 
     eframe::run_native(
-        "RDeskMini",
+        APP_TITLE,
         options,
         Box::new(|_cc| {
             let mut app = AppState::default();

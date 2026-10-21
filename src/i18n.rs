@@ -33,7 +33,6 @@ fn pick(en: &'static str, pt_br: &'static str, es: &'static str) -> &'static str
 
 pub fn t(key: &str) -> &'static str {
     match key {
-        "app_title" => "RDeskMini",
         "this_device" => pick("This device", "Este dispositivo", "Este dispositivo"),
         "your_code_hint" => pick(
             "Share this ID and the fingerprint below with the person connecting to you:",

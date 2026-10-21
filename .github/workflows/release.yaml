@@ -30,15 +30,14 @@ jobs:
             --title "Release ${GITHUB_REF_NAME}" \
             --verify-tag
 
-  build-unix:
+  build-desktop:
     name: Build ${{ matrix.job.os }} (${{ matrix.job.target }})
     permissions:
       contents: write
     runs-on: ${{ matrix.job.os }}
     needs: release
     env:
-      BIN: noipclient
-      ARCHIVE: noipclient-${{ github.ref_name }}-${{ matrix.job.target }}.tar.gz
+      TARGET: ${{ matrix.job.target }}
     strategy:
       fail-fast: false
       matrix:
@@ -49,8 +48,32 @@ jobs:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { os: macos-latest, target: x86_64-apple-darwin }
           - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@v6
+
+      - name: Set up Python
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Read package and binary names from Cargo.toml
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import os
+          import tomllib
+
+          with open("Cargo.toml", "rb") as manifest:
+              cargo = tomllib.load(manifest)
+
+          print(f"BIN={cargo['bin'][0]['name']}")
+          print(
+              f"ARCHIVE={cargo['package']['name'].lower()}-"
+              f"{os.environ['GITHUB_REF_NAME']}-{os.environ['TARGET']}.tar.gz"
+          )
+          PY
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -83,10 +106,15 @@ jobs:
         run: |
           set -euo pipefail
           dir="target/${{ matrix.job.target }}/release"
-          test -f "$dir/$BIN"
-          test -x "$dir/$BIN"
-          strip "$dir/$BIN" || true
-          tar czf "$ARCHIVE" -C "$dir" "$BIN"
+          binary="$BIN"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            binary="${BIN}.exe"
+          else
+            test -x "$dir/$binary"
+            strip "$dir/$binary" || true
+          fi
+          test -f "$dir/$binary"
+          tar czf "$ARCHIVE" -C "$dir" "$binary"
 
       - name: Upload release asset
         env:
@@ -111,10 +139,25 @@ jobs:
           # Termux on x86_64 emulators / ChromeOS Linux (rare, but cheap).
           - { target: x86_64-linux-android,   api: 24, termux_arch: x86_64 }
     env:
-      BIN: noipclient
-      ARCHIVE: noipclient-${{ github.ref_name }}-${{ matrix.job.target }}.tar.gz
+      TARGET: ${{ matrix.job.target }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Read package and binary names from Cargo.toml
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import os
+          import tomllib
+
+          with open("Cargo.toml", "rb") as manifest:
+              cargo = tomllib.load(manifest)
+
+          print(f"BIN={cargo['bin'][0]['name']}")
+          print(
+              f"ARCHIVE={cargo['package']['name'].lower()}-"
+              f"{os.environ['GITHUB_REF_NAME']}-{os.environ['TARGET']}.tar.gz"
+          )
+          PY
 
       - name: Install cross (current git version, up-to-date Android images)
         run: cargo install cross --git https://github.com/cross-rs/cross --locked

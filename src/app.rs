@@ -329,7 +329,7 @@ impl eframe::App for AppState {
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(i18n::t("app_title"));
+                ui.heading(crate::APP_TITLE);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let lang_label = match i18n::current() {
                         i18n::Language::English => "🇺🇸 US_ENG",
